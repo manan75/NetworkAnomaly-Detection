@@ -11,6 +11,29 @@ import numpy as np
 import pandas as pd
 from typing import Optional
 
+# ---------------------------------------------------------------------------
+# 0. Constants
+# ---------------------------------------------------------------------------
+
+TIME_WINDOW_SECONDS  = 5     # group packets within this window into a flow
+MIN_PACKETS_PER_FLOW = 5     # discard flows with fewer packets (too sparse to classify reliably)
+CONFIDENCE_THRESHOLD = 80.0  # predictions below this % are demoted to 'Benign' at inference time
+
+# ---------------------------------------------------------------------------
+# 0b. Protocol normalisation
+# Collapses TLS variants, SSL versions etc. into canonical names so the model
+# doesn't treat TLSv1.2 and TLSv1.3 as completely different protocols.
+# ---------------------------------------------------------------------------
+
+PROTOCOL_NORMALISE = {
+    'TLSV1':   'TLS', 'TLSV1.1': 'TLS', 'TLSV1.2': 'TLS', 'TLSV1.3': 'TLS',
+    'SSL':     'TLS', 'SSLV2':   'TLS', 'SSLV3':   'TLS',
+    'HTTP/XML':'HTTP','HTTP/JSON':'HTTP',
+}
+
+def normalise_protocol(proto: str) -> str:
+    key = str(proto).upper().strip()
+    return PROTOCOL_NORMALISE.get(key, key)
 
 # ---------------------------------------------------------------------------
 # 1. Info column parsers
@@ -68,7 +91,9 @@ def preprocess_packets(df: pd.DataFrame) -> pd.DataFrame:
     df['time']   = pd.to_numeric(df['time'],   errors='coerce')
     df['length'] = pd.to_numeric(df['length'], errors='coerce')
     df['info']   = df['info'].fillna('').astype(str)
-    df['protocol'] = df['protocol'].fillna('UNKNOWN').astype(str).str.upper().str.strip()
+    df['protocol'] = (df['protocol'].fillna('UNKNOWN')
+                        .astype(str).str.upper().str.strip()
+                        .apply(normalise_protocol))
     df['source']      = df['source'].fillna('0.0.0.0').astype(str).str.strip()
     df['destination'] = df['destination'].fillna('0.0.0.0').astype(str).str.strip()
 
@@ -91,9 +116,6 @@ def preprocess_packets(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # 3. Flow grouping & feature extraction
 # ---------------------------------------------------------------------------
-
-TIME_WINDOW_SECONDS = 5  # group packets within this sliding window into a flow
-
 
 def assign_flow_id(df: pd.DataFrame, window: float = TIME_WINDOW_SECONDS) -> pd.DataFrame:
     """
@@ -161,6 +183,14 @@ def extract_flow_features(df: pd.DataFrame, label_col: Optional[str] = None) -> 
         return pd.Series(row)
 
     agg = df.groupby('flow_id').apply(flow_agg).reset_index()
+
+    # ── Drop micro-flows — they produce degenerate feature vectors ──────────
+    before = len(agg)
+    agg = agg[agg['packet_count'] >= MIN_PACKETS_PER_FLOW].reset_index(drop=True)
+    dropped = before - len(agg)
+    if dropped > 0:
+        print(f'    Dropped {dropped} micro-flows (< {MIN_PACKETS_PER_FLOW} packets)')
+    # ────────────────────────────────────────────────────────────────────────
 
     # Encode protocol as integer category
     agg['protocol_encoded'] = agg['protocol'].astype('category').cat.codes

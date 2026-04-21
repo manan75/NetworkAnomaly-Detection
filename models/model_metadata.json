@@ -1,0 +1,36 @@
+{
+  "best_model": "XGBoost",
+  "best_accuracy": 0.9947753396029259,
+  "rf_accuracy": 0.9885057471264368,
+  "xgb_accuracy": 0.9947753396029259,
+  "classes": [
+    "Benign",
+    "Brute_Force",
+    "Exploit",
+    "Flood",
+    "Malware",
+    "Probe"
+  ],
+  "feature_cols": [
+    "packet_count",
+    "avg_length",
+    "std_length",
+    "min_length",
+    "max_length",
+    "avg_iat",
+    "std_iat",
+    "duration",
+    "bytes_per_second",
+    "packets_per_second",
+    "syn_count",
+    "ack_count",
+    "fin_count",
+    "rst_count",
+    "http_request_count",
+    "http_response_count",
+    "unique_dst_ports",
+    "protocol_encoded"
+  ],
+  "n_flows_train": 12624,
+  "n_flows_test": 957
+}
